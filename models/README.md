@@ -1,1 +1,1 @@
-Place your own trained fcnvmb_sim.pt here. Weights are not included.
+Put your trained fcnvmb_sim.pt in this folder. Weights are not included.
