@@ -1,6 +1,6 @@
 # Seismic Velocity Modelling — full navigation
 
-All 12 sections from the previous app are restored with their original page logic: Home; Model Explorer; Seismic Acquisition; Velocity Prediction; Results and Error Analysis; Time–Depth and Well Comparison; Robustness Lab; Candidate Least Squares; Theory and Methodology; My Experiments; Profile and Settings; Authors.
+All 13 sections from the previous app are restored with their original page logic: Home; Model Explorer; Seismic Acquisition; Velocity Prediction; Results and Error Analysis; Time–Depth and Well Comparison; Robustness Lab; Candidate Least Squares; Theory and Methodology; My Experiments; Profile and Settings; Authors.
 
 ## Fresh GitHub repository (main only)
 1. Extract this ZIP into a NEW folder. Do not mix it with the earlier simplified package.
@@ -23,7 +23,7 @@ Open Anaconda Prompt in the extracted folder:
 After installing dependencies you may also double-click run_windows.bat.
 
 ## Accounts and private saved work (optional)
-All 12 navigation options appear without database secrets. Geological modelling, acquisition, prediction, errors, time-depth comparison, robustness, residual ranking, theory, downloads and author cards work in guest mode. My Experiments and Profile and Settings retain the original sign-in workflow and require Supabase for persistent private saves.
+All 13 navigation options appear without database secrets. Geological modelling, acquisition, prediction, errors, time-depth comparison, robustness, residual ranking, theory, downloads and author cards work in guest mode. My Experiments and Profile and Settings retain the original sign-in workflow and require Supabase for persistent private saves.
 To enable them in a NEW Supabase project:
 1. Run supabase/migrations/001_initial.sql once in the Supabase SQL editor.
 2. Configure email authentication/confirmation and recovery settings in Supabase.
@@ -34,5 +34,12 @@ Existing configured Supabase projects can keep their existing schema/secrets; do
 Original author cards and details are included. Add original portraits optionally at assets/authors/shivam.jpeg and assets/authors/ankit.png. Without photos the cards show initials.
 
 ## Validation and scope
-Python files compile, all 12 page labels and branches are present, internal imports resolve at the source level, and the exported raw amplitude/metadata convention matches the supplied notebook. PyTorch and Streamlit were unavailable in the packaging environment, so full inference/UI/account round trips have NOT been executed here. Test locally before deployment.
+Python files compile, all 13 page labels and branches are present, internal imports resolve at the source level, and the exported raw amplitude/metadata convention matches the supplied notebook. PyTorch and Streamlit were unavailable in the packaging environment, so full inference/UI/account round trips have NOT been executed here. Test locally before deployment.
 This restores the previous portal page logic while keeping metadata compatibility and the matching-data exporter. Trained weights, old screenshots, portraits and mismatched quick examples are not bundled. Synthetic constant-density acoustic assumptions do not establish field accuracy.
+
+## Original-app features restored in this edition
+Optional Include salt body in Model Explorer (4500 m/s); source/receiver geometry; Ricker wavelet; seismic spectrum; raw NPY, metadata NPZ and SEG-Y inputs; prediction scatter plot; CSV and JSON downloads; frequency or FFT-bin high-pass; seeded noise; baseline/perturbed prediction and spectral comparisons; robustness saves; historical FWI Comparison; experiment comparison/reopening; sample and salt-seed bookmarks; authors. Time–Depth and Candidate Least Squares remain included, giving 13 pages total.
+
+Salt is an additional body, not one of the 2–4 background units. The current notebook default excluded salt during training; optional salt experiments do not establish trained salt accuracy. Re-training with salt is a separate study choice. Simulation uses the same salt velocity map shown in Model Explorer.
+
+Salt generator executed successfully on three seeds with the original 201×301 grid: finite output, 4500 m/s salt pixels and toggled salt/no-salt differences verified. Python source compiles and all 13 page branches exist. Full PyTorch inference, Streamlit UI and Supabase account round trips remain untested here. The linked deployed app was inaccessible to automated reading; feature restoration was based on its repository main/app.py and v2-test sources.

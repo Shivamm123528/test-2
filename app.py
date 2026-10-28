@@ -21,7 +21,7 @@ h1,h2,h3{letter-spacing:-.025em}
 </style>""",unsafe_allow_html=True)
 PAGES=["Home","Model Explorer","Seismic Acquisition","Velocity Prediction","Results and Error Analysis",
        "Time–Depth and Well Comparison","Robustness Lab","Candidate Least Squares",
-       "Theory and Methodology","My Experiments","Profile and Settings","Authors"]
+       "FWI Comparison","Theory and Methodology","My Experiments","Profile and Settings","Authors"]
 if "_pending_nav" in st.session_state:st.session_state.nav=st.session_state.pop("_pending_nav")
 def goto(page):st.session_state["_pending_nav"]=page;st.rerun()
 user=auth.identity()
@@ -103,7 +103,8 @@ def set_sample(d,v,m,name):
     st.session_state.sample=dict(data=d,truth=v,meta=m,name=name)
 def input_picker():
     with st.expander("Load seismic data",expanded="sample" not in st.session_state):
-        examples=sorted((ROOT/"data").glob("v2_*.npz"))
+        st.caption("Prepared examples must match the active checkpoint. Put exported matching NPZ files in data/ to offer them here.")
+        examples=sorted((ROOT/"data").glob("*.npz"))
         if examples:
             chosen=st.selectbox("Prepared v2 example",examples,format_func=lambda p:p.stem)
             if st.button("Load prepared v2 example"):
@@ -115,6 +116,21 @@ def input_picker():
         st.caption(f"Expected seismic shape {tuple(A['input_shape'])}; velocity shape {tuple(A['model_shape'])}. Export matching data using the supplied EXPORT_TEST_SAMPLE.py. Incompatible samples cannot be fixed by reshaping.")
         if f and st.button("Validate and load NPZ"):
             try:d,v,m=load_arrays(f.getvalue(),f.name);set_sample(d,v,m,f.name);st.success("Loaded.")
+            except Exception as e:st.error(str(e))
+            if user and st.button('Bookmark prepared example'):
+                try:
+                    pr=store.profile(user);items=pr.get('bookmarks',[]);item=dict(kind='sample',filename=chosen.name)
+                    if item not in items:items.append(item)
+                    store.update_profile(user,bookmarks=items[-100:]);st.success('Bookmarked.')
+                except Exception as e:st.error(str(e))
+        raw_file=st.file_uploader("Raw NPY seismic (metadata confirmation required)",type=["npy"],key="raw_npy")
+        raw_confirm=st.checkbox("I verified this NPY uses the active checkpoint acquisition and raw amplitudes.")
+        if raw_file and raw_confirm and st.button("Load raw NPY"):
+            try:
+                from lab.data import numeric
+                if raw_file.size>64*1024**2:raise ValueError("NPY exceeds 64 MiB.")
+                d=numeric(np.load(io.BytesIO(raw_file.getvalue()),allow_pickle=False),tuple(A['input_shape']),"seismic")
+                set_sample(d,None,dict(A),raw_file.name);st.success("Raw seismic loaded.")
             except Exception as e:st.error(str(e))
         with st.expander("SEG-Y input"):
             from lab.segy import inspect_segy,load_segy,SHOT_FIELDS
@@ -185,10 +201,11 @@ elif page=="Model Explorer":
     with st.form("earth"):
         a,b=st.columns(2);seed=a.number_input("Random seed",0,1000000,17)
         n=b.select_slider("Number of main geological units",options=[2,3,4],value=4)
+        salt=st.checkbox("Include salt body",value=False)
         generate=st.form_submit_button("Generate velocity model",type="primary")
     if "velocity" not in st.session_state or generate:
-        v,labels,info=make_earth(np.random.default_rng(seed),C,n)
-        st.session_state.update(velocity=v,layer_labels=labels,geology=info,model_seed=int(seed),model_layers=int(n))
+        v,labels,info=make_earth(np.random.default_rng(seed),C,n,salt=salt)
+        st.session_state.update(velocity=v,layer_labels=labels,geology=info,model_seed=int(seed),model_layers=int(n),model_salt=bool(salt))
     v=st.session_state.velocity
     if list(v.shape)!=A["model_shape"]:
         st.warning("Regenerate the model after changing the checkpoint.");st.stop()
@@ -197,11 +214,13 @@ elif page=="Model Explorer":
     with b:
         st.metric("Geological units",st.session_state.geology["n_layers"])
         st.metric("Minimum layer thickness",f"{st.session_state.geology['minimum_thickness_m']:.0f} m")
-        st.caption("Non-crossing boundaries; no added salt body. Velocity gradients inside a unit are not extra geological layers.")
+        st.caption("Velocity gradients inside a unit are not extra geological layers.")
+        if st.session_state.geology.get("salt"):
+            st.warning("Salt body enabled at 4500 m/s. It is an additional body beyond the 2–4 background units. Your notebook default training prior excluded salt; prediction accuracy on salt is unverified.")
     x=st.slider("Vertical profile position (m)",0,int((C["nx"]-1)*C["dx_m"]),int((C["nx"]-1)*C["dx_m"]/2),int(C["dx_m"]))
     profiles(v,None,int(x/C["dx_m"]))
     with st.expander("How was this model designed?"):
-        st.write("Use the v2 notebook lithology/gradient generator, with 2–4 units, at least 300 m initial column thickness and at least 200 m interface spacing before optional fault displacement. Interfaces are folded and smoothed; weak lateral heterogeneity is included. No additional salt body is inserted.")
+        st.write("Use the v2 notebook lithology/gradient generator, with 2–4 units, at least 300 m initial column thickness and at least 200 m interface spacing before optional fault displacement. Interfaces are folded and smoothed; weak lateral heterogeneity is included. The optional salt body uses the notebook generator at 4500 m/s and adds a body beyond the background layers.")
         st.json(st.session_state.geology)
         st.caption("This matches the v2 notebook prior, whose training examples may contain two, three or four units. The lithology labels and velocities are synthetic assumptions, not local field measurements.")
     b=io.BytesIO();np.save(b,v)
@@ -209,7 +228,7 @@ elif page=="Model Explorer":
     if user and st.button("Bookmark seed and layer count"):
         try:
             pr=store.profile(user);items=pr.get("bookmarks",[])
-            item=dict(kind="four_unit_seed",seed=int(seed),layers=int(n))
+            item=dict(kind="four_unit_seed",seed=st.session_state.model_seed,layers=st.session_state.model_layers,salt=st.session_state.get("model_salt",False))
             if item not in items:items.append(item)
             store.update_profile(user,bookmarks=items[-100:]);st.success("Bookmarked.")
         except Exception as e:st.error(str(e))
@@ -228,11 +247,21 @@ elif page=="Seismic Acquisition":
                 set_sample(d,st.session_state.velocity,m,"Generated model");st.rerun()
             except Exception as e:st.error(str(e))
     if s:
+        geometry=go.Figure()
+        geometry.add_scatter(x=np.asarray(A['receiver_x_m'])/1000,y=np.full(A['receivers'],A['receiver_z_m']),mode='markers',name='Receivers',marker=dict(size=3))
+        geometry.add_scatter(x=np.asarray(A['source_x_m'])/1000,y=np.full(A['shots'],A['source_z_m']),mode='markers',name='Sources',marker=dict(size=12,symbol='star'))
+        geometry.update_layout(title='Source and receiver geometry',xaxis_title='Distance (km)',yaxis_title='Depth (m)');chart(geometry)
         shot=st.slider("Shot",1,A["shots"],max(1,A["shots"]//2))-1
         heat(s["data"][shot],f"Shot {shot+1}","gather")
         receiver=st.slider("Receiver index",0,A["receivers"]-1,A["receivers"]//2)
         f=go.Figure(go.Scatter(x=np.arange(A["time_samples"])*A["dt_s"],y=s["data"][shot,:,receiver]))
         f.update_layout(xaxis_title="Recording time (s)",yaxis_title="Amplitude");chart(f)
+        time=np.arange(C['nt'])*C['dt_sim_s']; q=(np.pi*C['source_hz']*(time-1/C['source_hz']))**2
+        wave=(1-2*q)*np.exp(-q)
+        f=go.Figure(go.Scatter(x=time,y=wave));f.update_layout(title=f"{C['source_hz']:g} Hz Ricker source",xaxis_title='Time (s)',yaxis_title='Amplitude');chart(f)
+        freq=np.fft.rfftfreq(s['data'].shape[1],A['dt_s']);amp=np.abs(np.fft.rfft(s['data'],axis=1)).mean(axis=(0,2))
+        f=go.Figure(go.Scatter(x=freq,y=amp));f.update_layout(title='Mean amplitude spectrum',xaxis_title='Frequency (Hz)',yaxis_title='Amplitude');chart(f)
+        if st.button('Continue to velocity prediction'):goto('Velocity Prediction')
         st.json(A,expanded=False)
         st.download_button("Download sample",pack_sample(s),"seismic_sample.npz")
 
@@ -262,6 +291,10 @@ elif page=="Results and Error Analysis":
             for col,a,title,kind in zip(st.columns(3),[v,p,p-v],["True","Predicted","Signed error"],["velocity","velocity","error"]):
                 with col:heat(a,title,kind)
             values=metrics(p,v)
+            step=max(1,v.size//6000)
+            f=go.Figure(go.Scattergl(x=v.ravel()[::step],y=p.ravel()[::step],mode='markers',marker=dict(size=3,opacity=.3),name='Pixels'))
+            f.add_scatter(x=[1500,6000],y=[1500,6000],mode='lines',name='1:1')
+            f.update_layout(xaxis_title='True velocity (m/s)',yaxis_title='Predicted velocity (m/s)');chart(f)
             lo,hi=st.slider("Depth interval (m)",0,int((C["nz"]-1)*C["dz_m"]),(0,int((C["nz"]-1)*C["dz_m"])),int(C["dz_m"]))
             if hi-lo>=6*C["dz_m"]:st.json(map_scores(p[int(lo/C["dz_m"]):int(hi/C["dz_m"])+1],v[int(lo/C["dz_m"]):int(hi/C["dz_m"])+1]))
             else:st.caption("Choose at least seven depth samples for SSIM.")
@@ -269,6 +302,10 @@ elif page=="Results and Error Analysis":
             profiles(v,p,int(x/C["dx_m"]))
         else:heat(p,"Predicted velocity");st.info("No true velocity: model-domain error cannot be computed.")
         st.download_button("Download prediction and input",pack_sample(s,p),"velocity_result.npz")
+        vals=map_scores(p,s['truth']) if s['truth'] is not None else {}
+        st.download_button('Download metrics JSON',json.dumps(vals,indent=2),'metrics.json')
+        out=io.StringIO();np.savetxt(out,p,delimiter=',',fmt='%.3f')
+        st.download_button('Download prediction CSV',out.getvalue(),'prediction.csv')
         save(s,p)
     st.divider();st.subheader("All-model test report")
     report=st.file_uploader("Upload results/test/per_model.csv from the notebook",type=["csv"])
@@ -321,19 +358,51 @@ elif page=="Time–Depth and Well Comparison":
 elif page=="Robustness Lab":
     st.title("Robustness Lab");s=input_picker()
     if s:
-        noise=st.slider("Noise as fraction of sample 99.5th amplitude percentile",0.,.25,.05,.01)
+        noise=st.slider("Gaussian noise (%)",0,25,5)/100
         amplitude=st.slider("Amplitude multiplier",.25,3.,1.,.05)
-        cutoff=st.slider("Remove frequencies below (Hz)",0.,20.,0.,.5)
-        if st.button("Run robustness test"):
-            try:
-                d=s["data"].copy()*amplitude
-                if noise:d+=np.random.default_rng(0).normal(0,np.quantile(np.abs(d),.995)*noise,d.shape).astype(np.float32)
-                if cutoff:
-                    freq=np.fft.rfft(d,axis=1);freq[:,np.fft.rfftfreq(d.shape[1],A["dt_s"])<cutoff,:]=0
-                    d=np.fft.irfft(freq,n=d.shape[1],axis=1).astype(np.float32)
-                net,ck=trained();p=predict_map(net,ck,d);heat(p,"Perturbed-input prediction")
-                if s["truth"] is not None:metrics(p,s["truth"])
-            except Exception as e:st.error(str(e))
+        mode=st.selectbox("High-pass method",["Hz","Notebook bins"])
+        cutoff=st.slider("Cutoff (Hz)" if mode=="Hz" else "Fraction of lowest FFT bins",0.,float(.4 if mode=="Notebook bins" else .5/A['dt_s']),0.,.01 if mode=="Notebook bins" else .5)
+        seed=st.number_input("Noise seed",0,100000,0)
+        if st.button("Apply from original input"):
+            d=s['data'].copy()*amplitude
+            if noise:d+=np.random.default_rng(seed).normal(0,np.quantile(np.abs(d),.995)*noise,d.shape).astype(np.float32)
+            if cutoff:
+                ff=np.fft.rfft(d,axis=1)
+                if mode=='Hz':ff[:,np.fft.rfftfreq(d.shape[1],A['dt_s'])<cutoff,:]=0
+                else:ff[:,:int(ff.shape[1]*cutoff),:]=0
+                d=np.fft.irfft(ff,n=d.shape[1],axis=1).astype(np.float32)
+            st.session_state.robust=dict(data=d,settings=dict(noise=noise,amplitude=amplitude,mode=mode,cutoff=cutoff,seed=int(seed)))
+        r=st.session_state.get('robust')
+        if r:
+            st.json(r['settings']);shot=min(2,A['shots']-1)
+            for col,d,title in zip(st.columns(2),[s['data'],r['data']],['Original shot','Altered shot']):
+                with col:heat(d[shot],title,'gather')
+            fig=go.Figure()
+            for d,label in [(s['data'],'Original'),(r['data'],'Altered')]:
+                fig.add_scatter(x=np.fft.rfftfreq(d.shape[1],A['dt_s']),y=np.abs(np.fft.rfft(d,axis=1)).mean(axis=(0,2)),name=label)
+            fig.update_layout(xaxis_title='Frequency (Hz)',yaxis_title='Mean amplitude');chart(fig)
+            if st.button('Compare predictions'):
+                try:
+                    net,ck=trained();r['baseline']=predict_map(net,ck,s['data']);r['pred']=predict_map(net,ck,r['data'])
+                except Exception as e:st.error(str(e))
+            if 'pred' in r:
+                for col,v,title in zip(st.columns(2),[r['baseline'],r['pred']],['Original-input prediction','Altered-input prediction']):
+                    with col:heat(v,title)
+                if s['truth'] is not None:st.dataframe([dict(condition=k,**map_scores(r[key],s['truth'])) for k,key in [('Original','baseline'),('Altered','pred')]])
+                save({**s,'data':r['data'],'name':s['name']+' robustness','meta':{**s['meta'],'robustness':r['settings']}},r['pred'])
+        st.caption('Every perturbation starts from original input; saved settings describe the displayed experiment.')
+
+elif page=="FWI Comparison":
+    st.title('Deep learning and FWI')
+    h=json.loads((ROOT/'assets/notebook_metrics.json').read_text());f=h['fwi']
+    st.info('Historical original notebook CPU run. These values are not measurements of your current checkpoint or session.')
+    st.dataframe([dict(Quantity='MSE (m/s)²',FCN=f['network_mse'],FWI=f['fwi_mse']),dict(Quantity='Time per model (s)',FCN=f['inference_s'],FWI=f['fwi_s'])])
+    fig=go.Figure(go.Bar(x=['FCN inference','FWI'],y=[f['inference_s'],f['fwi_s']]))
+    fig.update_yaxes(type='log',title='Time (s)');chart(fig)
+    st.write('The network was faster; FWI was more accurate on the one compared model. FWI started from a Gaussian-smoothed true model. Network training and dataset generation are excluded from inference timing.')
+    st.write(f"Historical network training: {f['training_min']} min; compared models: {f['models']}.")
+    st.subheader('Historical robustness results');st.dataframe(h['conditions'])
+    st.caption('Historical metrics used the original model range; do not compare PSNR directly with this v2 app’s 4500 m/s range. No live FWI optimisation or fabricated FWI maps are presented.')
 
 elif page=="Candidate Least Squares":
     st.title("Candidate Least Squares");s=input_picker()
@@ -358,7 +427,7 @@ elif page=="Candidate Least Squares":
 elif page=="Theory and Methodology":
     st.title("Theory and Methodology")
     st.markdown("""
-1. **Geology:** 4 km depth, two to four main geological units, with notebook thickness constraints; no extra salt body.
+1. **Geology:** 4 km depth, two to four background geological units, with notebook thickness constraints. Optional salt adds a 4500 m/s body and is outside the default training prior.
 2. **Velocity prior:** illustrative increasing sedimentary interval velocities with small within-unit depth gradients. Local well calibration is optional in the notebook.
 3. **Physics:** 2-D constant-density acoustics, eighth-order space/second-order time, side/bottom sponge. No calibrated free surface, attenuation, elasticity or anisotropy.
 4. **Acquisition:** checkpoint metadata defines source and receiver positions, depths, source frequency, record length and sampling. Read the active acquisition settings below; the supplied laptop configuration uses 5 shots, 10 Hz and a 4 s record.
@@ -367,6 +436,11 @@ elif page=="Theory and Methodology":
 7. **Evaluation:** save every test prediction and its error, depth-dependent error and vertical time–depth comparison. Report aggregate and failure statistics.
 8. **Reality check:** real Earth can have more than four layers. Marmousi2 and OpenFWI are synthetic benchmarks. Field claims require measured seismic and independent well/velocity constraints.
 """)
+    st.subheader('Network architecture')
+    st.write(f"Modified U-Net: {C['shots']} shot channels; four pooling levels; base width {C['base']}; skip connections; transposed convolution decoder; 1×1 output convolution. Input is padded to a multiple of 16; output is cropped or resized to {C['nz']} × {C['nx']}.")
+    st.caption('19 Conv2d layers and 4 transposed convolutions. Learned output projection is not physical time–depth conversion.')
+    curves=st.file_uploader('Display your saved training-curve figure (optional)',type=['png','jpg','jpeg'])
+    if curves:st.image(curves,caption='User-supplied saved training curves; not a live training run.')
     st.json(A,expanded=False)
     for title,url in REFERENCES:st.link_button(title,url)
     st.caption("The numerical priors are project design choices; they are not tables copied from these references.")
@@ -383,7 +457,16 @@ elif page=="My Experiments":
                 selected=st.selectbox("Experiment",records,format_func=lambda r:r["name"]+" "+r["created_at"][:16])
                 st.json(selected["metrics"]);st.json(selected["settings"],expanded=False)
                 if selected.get("object_path") and st.button("Reopen arrays"):
-                    d,v,m=load_arrays(store.download(selected),"saved.npz");set_sample(d,v,m,selected["name"]);goto("Velocity Prediction")
+                    blob=store.download(selected);d,v,m=load_arrays(blob,"saved.npz");set_sample(d,v,m,selected["name"])
+                    with np.load(io.BytesIO(blob),allow_pickle=False) as z:
+                        if 'prediction' in z:
+                            from lab.data import numeric
+                            st.session_state.prediction=numeric(z['prediction'],tuple(A['model_shape']),'prediction')
+                    goto('Results and Error Analysis' if 'prediction' in st.session_state else 'Velocity Prediction')
+                compare=st.multiselect("Compare two saved experiments",records,format_func=lambda r:r['name']+' '+r['id'][:6],max_selections=2)
+                if len(compare)==2:
+                    st.dataframe([dict(name=r['name'],**r['metrics']) for r in compare])
+                    st.caption('Compare metrics only for matching truth, acquisition and evaluation definitions.')
                 with st.form("notes"):
                     notes=st.text_area("Notes",selected["notes"],max_chars=4000);ok=st.form_submit_button("Update notes")
                 if ok:auth.client().table("experiments").update({"notes":notes}).eq("id",selected["id"]).execute();st.success("Updated.")
@@ -403,10 +486,17 @@ elif page=="Profile and Settings":
                 ok=st.form_submit_button("Save profile")
             if ok:store.update_profile(user,display_name=name,preferences={"show_tips":tips});st.success("Saved.")
             for i,item in enumerate(pr.get("bookmarks",[])):
+                if item.get('kind')=='sample':
+                    if st.button('Open example '+item['filename'],key=f'sample_bookmark_{i}'):
+                        f=ROOT/'data'/Path(item['filename']).name
+                        if f.is_file():
+                            d,v,m=load_arrays(f.read_bytes(),f.name);set_sample(d,v,m,f.stem);goto('Seismic Acquisition')
+                        else:st.info('This bookmarked example is not deployed.')
+                    continue
                 if item.get("kind")!="four_unit_seed":continue
                 if st.button(f"Seed {item['seed']} · {item['layers']} units",key=f"bookmark_{i}"):
-                    v,labels,info=make_earth(np.random.default_rng(item["seed"]),C,item["layers"])
-                    st.session_state.update(velocity=v,layer_labels=labels,geology=info,model_seed=item["seed"],model_layers=item["layers"]);goto("Model Explorer")
+                    v,labels,info=make_earth(np.random.default_rng(item["seed"]),C,item["layers"],salt=item.get("salt",False))
+                    st.session_state.update(velocity=v,layer_labels=labels,geology=info,model_seed=item["seed"],model_layers=item["layers"],model_salt=item.get("salt",False));goto("Model Explorer")
             st.caption("Supabase Auth manages passwords. Passwords are never saved to application profile tables.")
         except Exception as e:st.error(str(e))
 elif page=="Authors":render_authors(ROOT)
