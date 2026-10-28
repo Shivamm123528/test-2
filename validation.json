@@ -1,0 +1,17 @@
+{
+  "checkpoint_repository": "Shivamm123528/test-2",
+  "checkpoint_branch": "main",
+  "stencil_relative_l2": 7.99278e-07,
+  "samples": [
+    {
+      "file": "v2_layered_seed17.npz",
+      "inference_passed": true,
+      "RMSE_m_s": 869.4555
+    },
+    {
+      "file": "v2_salt_seed29.npz",
+      "inference_passed": true,
+      "RMSE_m_s": 561.9944
+    }
+  ]
+}

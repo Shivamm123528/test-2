@@ -27,6 +27,7 @@ def goto(page):st.session_state["_pending_nav"]=page;st.rerun()
 user=auth.identity()
 with st.sidebar:
     st.markdown("### SEISMIC\nVelocity Modelling")
+    st.caption("Build: sample-check + salt · test-2/main")
     page=st.radio("Workspace",PAGES,key="nav",label_visibility="collapsed")
     st.divider()
     if user:
@@ -63,7 +64,7 @@ if st.session_state.get("_active_contract")!=current_contract:
     st.session_state._active_contract=current_contract
 def chart(fig):
     fig.update_layout(height=410,margin=dict(l=25,r=20,t=50,b=35),paper_bgcolor="rgba(0,0,0,0)",
-                      font=dict(family="Arial",color="#233044"))
+                      font=dict(family="Arial"))
     st.plotly_chart(fig,use_container_width=True)
 def heat(v,title,kind="velocity",meta=None):
     a=A if meta is None else meta
@@ -105,24 +106,39 @@ def input_picker():
     with st.expander("Load seismic data",expanded="sample" not in st.session_state):
         st.caption("Prepared examples must match the active checkpoint. Put exported matching NPZ files in data/ to offer them here.")
         examples=sorted((ROOT/"data").glob("*.npz"))
-        if examples:
-            chosen=st.selectbox("Prepared v2 example",examples,format_func=lambda p:p.stem)
-            if st.button("Load prepared v2 example"):
+        compatible=[];report=[]
+        for example in examples:
+            try:
+                load_arrays(example.read_bytes(),example.name)
+                compatible.append(example)
+                report.append(dict(File=example.name,Status="Compatible",Details="Acquisition and shape match"))
+            except Exception as e:
+                report.append(dict(File=example.name,Status="Incompatible",Details=str(e)))
+        if report:
+            with st.expander("Samples found in data/",expanded=not compatible):
+                st.dataframe(report,use_container_width=True,hide_index=True)
+        if compatible:
+            chosen=st.selectbox("Prepared matching example",compatible,format_func=lambda p:p.stem)
+            if st.button("Load prepared matching example"):
                 try:
                     d,v,m=load_arrays(chosen.read_bytes(),chosen.name)
                     set_sample(d,v,m,chosen.stem);st.success("Prepared example loaded.")
                 except Exception as e:st.error(str(e))
-        f=st.file_uploader("Revised NPZ sample (raw seismic, optional velocity, acquisition metadata)",type=["npz"],key="seismic_input")
-        st.caption(f"Expected seismic shape {tuple(A['input_shape'])}; velocity shape {tuple(A['model_shape'])}. Export matching data using the supplied EXPORT_TEST_SAMPLE.py. Incompatible samples cannot be fixed by reshaping.")
-        if f and st.button("Validate and load NPZ"):
-            try:d,v,m=load_arrays(f.getvalue(),f.name);set_sample(d,v,m,f.name);st.success("Loaded.")
-            except Exception as e:st.error(str(e))
             if user and st.button('Bookmark prepared example'):
                 try:
                     pr=store.profile(user);items=pr.get('bookmarks',[]);item=dict(kind='sample',filename=chosen.name)
                     if item not in items:items.append(item)
                     store.update_profile(user,bookmarks=items[-100:]);st.success('Bookmarked.')
                 except Exception as e:st.error(str(e))
+        else:
+            st.info(f"No compatible prepared sample found. This checkpoint requires {tuple(A['input_shape'])}, {A['dx_m']:g} m grid, {A['dt_s']:g} s saved sampling and {A['source_hz']:g} Hz source.")
+            st.write("Open EXPORT_TEST_SAMPLE.py from this repository. Paste its entire contents into a new cell in your original training notebook, with the original DATA_DIR/configuration available. Run the cell, then upload Downloads/matching_test_sample.npz below or add it to this repository's data/ folder.")
+            st.caption("Alternatively: Model Explorer → generate a model (optional salt) → Seismic Acquisition → Simulate the current geological model. Full CPU simulation may take several minutes.")
+        f=st.file_uploader("Revised NPZ sample (raw seismic, optional velocity, acquisition metadata)",type=["npz"],key="seismic_input")
+        st.caption(f"Expected seismic shape {tuple(A['input_shape'])}; velocity shape {tuple(A['model_shape'])}. Export matching data using the supplied EXPORT_TEST_SAMPLE.py. Incompatible samples cannot be fixed by reshaping.")
+        if f and st.button("Validate and load NPZ"):
+            try:d,v,m=load_arrays(f.getvalue(),f.name);set_sample(d,v,m,f.name);st.success("Loaded.")
+            except Exception as e:st.error(str(e))
         raw_file=st.file_uploader("Raw NPY seismic (metadata confirmation required)",type=["npy"],key="raw_npy")
         raw_confirm=st.checkbox("I verified this NPY uses the active checkpoint acquisition and raw amplitudes.")
         if raw_file and raw_confirm and st.button("Load raw NPY"):
@@ -201,7 +217,7 @@ elif page=="Model Explorer":
     with st.form("earth"):
         a,b=st.columns(2);seed=a.number_input("Random seed",0,1000000,17)
         n=b.select_slider("Number of main geological units",options=[2,3,4],value=4)
-        salt=st.checkbox("Include salt body",value=False)
+        salt=st.checkbox("Include salt body",value=False,help="Adds a 4500 m/s salt body to the generated model. Click Generate velocity model to apply.")
         generate=st.form_submit_button("Generate velocity model",type="primary")
     if "velocity" not in st.session_state or generate:
         v,labels,info=make_earth(np.random.default_rng(seed),C,n,salt=salt)
@@ -501,4 +517,5 @@ elif page=="Profile and Settings":
         except Exception as e:st.error(str(e))
 elif page=="Authors":render_authors(ROOT)
 st.divider();st.caption("Seismic Velocity Modelling · four-unit synthetic study · field performance unverified")
+
 
