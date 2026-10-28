@@ -4,6 +4,8 @@ BUCKET="experiments"
 def listing():
     return client().table("experiments").select("*").order("created_at",desc=True).limit(100).execute().data
 def save(user,name,notes,settings,metrics,blob=None):
+    if settings.get('transient_only') or settings.get('input_format')=='SEG-Y':
+        raise ValueError('SEG-Y sessions must not be saved to Supabase.')
     eid=str(uuid.uuid4());obj=None
     if blob:
         if len(blob)>12*1024**2: raise ValueError("Result bundle exceeds 12 MiB.")
