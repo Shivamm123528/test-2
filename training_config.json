@@ -1,0 +1,15 @@
+{
+  "nz": 201,
+  "nx": 301,
+  "dx_m": 20.0,
+  "dz_m": 20.0,
+  "dt_sim_s": 0.001,
+  "source_hz": 10.0,
+  "nt": 4000,
+  "ds": 10,
+  "shots": 5,
+  "base": 16,
+  "velocity_offset": 1500.0,
+  "velocity_range": 4500.0,
+  "quick_test": false
+}
