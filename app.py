@@ -27,7 +27,7 @@ def goto(page):st.session_state["_pending_nav"]=page;st.rerun()
 user=auth.identity()
 with st.sidebar:
     st.markdown("### SEISMIC\nVelocity Modelling")
-    st.caption("Build: sample-check + salt · test-2/main")
+    st.caption("Build: SEG-Y 2GB + salt · test-2/main")
     page=st.radio("Workspace",PAGES,key="nav",label_visibility="collapsed")
     st.divider()
     if user:
@@ -150,11 +150,16 @@ def input_picker():
             except Exception as e:st.error(str(e))
         with st.expander("SEG-Y input"):
             from lab.segy import inspect_segy,load_segy,SHOT_FIELDS
-            seg=st.file_uploader("Pre-stack SEG-Y",type=["sgy","segy"])
+            st.caption('SEG-Y limit: 2 GB. Files are processed for this session and are never saved to Supabase. Large browser uploads still consume server memory; use a sufficiently provisioned local/server deployment for 2 GB surveys.')
+            prepared_segy=sorted((ROOT/'data').glob('*.sgy'))+sorted((ROOT/'data').glob('*.segy'))
+            selected_segy=st.selectbox('Prepared SEG-Y example',[None]+prepared_segy,format_func=lambda x:'None / upload my file' if x is None else x.stem)
+            seg=st.file_uploader("Pre-stack SEG-Y (maximum 2 GB)",type=["sgy","segy"])
+            source=seg if seg is not None else selected_segy
             field=st.selectbox("Shot grouping",list(SHOT_FIELDS));endian=st.selectbox("Byte order",["big","little"])
-            if seg:
+            if source is not None:
                 try:
-                    payload=seg.getvalue();info=inspect_segy(payload,SHOT_FIELDS[field],endian)
+                    payload=source
+                    info=inspect_segy(payload,SHOT_FIELDS[field],endian)
                     st.dataframe(info["shots"],use_container_width=True)
                     ids=[r["shot_id"] for r in info["shots"]]
                     selected=st.multiselect(f"Choose {A['shots']} shot IDs",ids,max_selections=A["shots"])
@@ -164,7 +169,7 @@ def input_picker():
                         d,v,m=load_segy(payload,selected,SHOT_FIELDS[field],endian,expected=A)
                         m.update({k:A[k] for k in ["schema","input_shape","model_shape","dz_m","source_hz","source_x_m",
                             "receiver_x_m","source_z_m","receiver_z_m","physics"]})
-                        set_sample(d,v,m,seg.name);st.success("Headers validated; physical assumptions acknowledged by user.")
+                        set_sample(d,v,m,source.name);st.success("Headers validated; physical assumptions acknowledged by user.")
                 except Exception as e:st.error(str(e))
     s=st.session_state.get("sample")
     if s:
@@ -186,6 +191,9 @@ def pack_sample(s,p=None):
     if p is not None:arrays["prediction"]=p
     np.savez_compressed(b,**arrays);return b.getvalue()
 def save(s,p=None):
+    if s['meta'].get('transient_only') or s['meta'].get('input_format')=='SEG-Y':
+        st.info('SEG-Y sessions are temporary: Supabase saving is disabled. Download results to keep a local copy.')
+        return
     if not user:st.info("Sign in on Home to save privately.");return
     with st.form("save_experiment"):
         name=st.text_input("Experiment name",s["name"],max_chars=100)
