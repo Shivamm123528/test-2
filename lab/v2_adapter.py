@@ -89,12 +89,12 @@ def predict_map(net,ck,d,device="cpu"):
     if not np.isfinite(p).all():raise ValueError("Network produced nonfinite velocities.")
     return p.astype(np.float32)
 
-def make_earth(rng,c=None,n_layers=None):
+def make_earth(rng,c=None,n_layers=None,salt=False):
     c=configuration() if c is None else c;env=runtime(c)
     if n_layers is not None:
         if n_layers not in [2,3,4]:raise ValueError("Choose two to four units.")
         env['N_LAYERS_MIN']=env['N_LAYERS_MAX']=int(n_layers)
-    v,info=env['make_velocity_model'](rng,return_info=True)
+    v,info=env['make_velocity_model'](rng,salt=bool(salt),return_info=True)
     labels=info.pop('layer_labels')
     info.update(prior="v2 notebook lithology/gradient prior; not local field calibration")
     return v,labels,info
